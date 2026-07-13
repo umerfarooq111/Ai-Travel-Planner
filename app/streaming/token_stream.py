@@ -3,10 +3,12 @@ from app.agent.graph import graph
 
 
 async def token_stream(state):
-
+    thread_id = state.get("user_id") or "default_user"
+    config = {"configurable": {"thread_id": thread_id}}
 
     async for event in graph.astream_events(
         state,
+        config=config,
         version="v2"
     ):
 

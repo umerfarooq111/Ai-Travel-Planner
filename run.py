@@ -1,5 +1,9 @@
+import sys
 from app.streaming.stream import stream_agent
 
+# Configure UTF-8 encoding for Windows console output
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
 
 state={
 
@@ -17,6 +21,8 @@ state={
 "tool_results":{}
 }
 
-for chunk in stream_agent(state):
+config = {"configurable": {"thread_id": "cli_thread"}}
+
+for chunk in stream_agent(state, config=config):
     print("\nSTREAM EVENT")
     print(chunk)

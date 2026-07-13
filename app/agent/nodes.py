@@ -6,6 +6,16 @@ from app.tools.currency import currency_converter
 from app.tools.travel import destination_info
 from app.prompts.travel_prompt import TRAVEL_PLANNER_PROMPT
 def requirement_analyzer(state):
+    state.setdefault("destination", None)
+    state.setdefault("duration", None)
+    state.setdefault("budget", None)
+    state.setdefault("currency", None)
+    state.setdefault("preferences", "")
+    state.setdefault("itinerary", None)
+    state.setdefault("final_response", None)
+    state.setdefault("required_tools", [])
+    state.setdefault("tool_results", {})
+
     prompt = f"""
 You are a travel requirement analyzer.
 
