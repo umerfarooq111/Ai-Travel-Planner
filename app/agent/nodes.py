@@ -4,7 +4,7 @@ import re
 from app.tools.weather import weather_tool
 from app.tools.currency import currency_converter
 from app.tools.travel import destination_info
-
+from app.prompts.travel_prompt import TRAVEL_PLANNER_PROMPT
 def requirement_analyzer(state):
     prompt = f"""
 You are a travel requirement analyzer.
@@ -34,29 +34,13 @@ preferences:
     else:
         extracted = response.content
 
-    destination = re.search(
-        r"destination:\s*(.*)",
-        extracted,
-        re.I
-    )
+    destination = re.search(r"destination:\s*(.*)",extracted,re.I)
 
-    duration = re.search(
-        r"duration:\s*(\d+)",
-        extracted,
-        re.I
-    )
+    duration = re.search(r"duration:\s*(\d+)",extracted,re.I)
 
-    budget = re.search(
-        r"budget:\s*(\d+)",
-        extracted,
-        re.I
-    )
+    budget = re.search(r"budget:\s*(\d+)",extracted,re.I)
 
-    currency = re.search(
-        r"currency:\s*(.*)",
-        extracted,
-        re.I
-    )
+    currency = re.search(r"currency:\s*(.*)",extracted,re.I)
 
     preferences = re.search(
         r"preferences:\s*(.*)",
@@ -86,23 +70,34 @@ preferences:
 
     return state
 
+def itinerary_generator(state):
 
+    prompt = TRAVEL_PLANNER_PROMPT.format(
+        destination=state["destination"],
+        duration=state["duration"],
+        budget=state["budget"],
+        currency=state["currency"],
+        tool_results=state["tool_results"]
+    )
+    response = model.invoke(prompt)
+    if isinstance(response.content,list):
+        itinerary=response.content[0]["text"]
+    else:
+        itinerary=response.content
+
+    state["itinerary"]=itinerary
+    state["final_response"]=itinerary
+    return state
 
 def tool_executor(state):
     results={}
     for tool in state["required_tools"]:
         if tool=="weather":
-            results["weather"]=weather_tool(
-                state["destination"]
-            )
+            results["weather"]=weather_tool(state["destination"])
         elif tool=="currency":
-            results["currency"]=currency_converter(
-                state["currency"]
-            )
+            results["currency"]=currency_converter(state["currency"])
         elif tool=="travel":
-            results["travel"]=destination_info(
-                state["destination"]
-            )
+            results["travel"]=destination_info(state["destination"])
 
     state["tool_results"]=results
     return state

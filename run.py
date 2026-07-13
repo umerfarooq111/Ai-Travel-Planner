@@ -5,12 +5,14 @@ state={
 
 "user_query":
 "Plan a 5 day trip to Turkey with budget of 200000 PKR",
+
 "destination":None,
 "duration":None,
 "budget":None,
 "currency":None,
 "preferences":None,
 "itinerary":None,
+"final_response":None,
 "required_tools":[],
 "tool_results":{}
 }

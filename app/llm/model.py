@@ -6,5 +6,6 @@ from app.config import GOOGLE_API_KEY
 model = ChatGoogleGenerativeAI(
     model="gemini-3.5-flash",
     google_api_key=GOOGLE_API_KEY,
-    temperature=0.3
+    temperature=0.3,
+     streaming=True
 )

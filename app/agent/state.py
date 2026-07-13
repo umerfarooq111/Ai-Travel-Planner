@@ -3,20 +3,22 @@ from typing import TypedDict, Optional, List
 
 class TravelState(TypedDict):
 
-    user_query:str
+    user_query: str
 
-    destination:Optional[str]
+    destination: Optional[str]
 
-    duration:Optional[int]
+    duration: Optional[int]
 
-    budget:Optional[int]
+    budget: Optional[int]
 
-    currency:Optional[str]
+    currency: Optional[str]
 
-    preferences:Optional[str]
+    preferences: Optional[str]
 
-    itinerary:Optional[str]
+    itinerary: Optional[str]
 
-    required_tools:List[str]
+    final_response: Optional[str]
 
-    tool_results:dict
+    required_tools: List[str]
+
+    tool_results: dict
