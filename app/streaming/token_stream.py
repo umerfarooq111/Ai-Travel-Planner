@@ -1,8 +1,4 @@
-from app.agent.graph import graph
-
-
-
-async def token_stream(state):
+async def token_stream(state, graph):
     thread_id = state.get("user_id") or "default_user"
     config = {"configurable": {"thread_id": thread_id}}
 
