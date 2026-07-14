@@ -22,3 +22,13 @@ async def travel_chat(
     return EventSourceResponse(
         event_generator()
     )
+
+@router.get("/travel/state/{thread_id}")
+async def get_travel_state(thread_id: str, request: Request):
+    graph = request.app.state.graph
+    config = {"configurable": {"thread_id": thread_id}}
+    try:
+        state_val = await graph.aget_state(config)
+        return state_val.values if state_val else {}
+    except Exception as e:
+        return {"error": str(e)}

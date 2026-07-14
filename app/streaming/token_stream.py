@@ -7,17 +7,11 @@ async def token_stream(state, graph):
         config=config,
         version="v2"
     ):
-
-
         kind = event["event"]
-
-
-        if kind == "on_chat_model_stream":
-
-
+        if kind == "on_node_start":
+            yield f"__STATUS__:{event['name']}"
+        elif kind == "on_chat_model_stream":
             chunk = event["data"]["chunk"]
-
-
             if chunk.content:
-
                 yield chunk.content
+    yield "__STATUS__:completed"
