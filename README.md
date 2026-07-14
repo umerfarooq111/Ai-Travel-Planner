@@ -8,27 +8,6 @@ AeroPlan AI is a state-of-the-art, database-backed personal travel planning appl
 
 AeroPlan AI separates concerns between a lightweight, high-performance FastAPI backend executing the agent graph and a highly styled Streamlit frontend displaying the data in real-time.
 
-```mermaid
-graph TD
-    User([User Interface]) -->|1. Submit Query / Click Builder| Streamlit[Streamlit Frontend]
-    Streamlit -->|2. POST /travel/chat/stream| FastAPI[FastAPI Backend]
-    FastAPI -->|3. Invoke Graph| LangGraph[LangGraph Engine]
-    
-    subgraph LangGraph Nodes
-        Analyzer[Requirement Analyzer] --> Decision[Decision Engine]
-        Decision --> Tools[Tool Executor]
-        Tools --> Planner[Itinerary Generator]
-    end
-    
-    LangGraph -->|Read/Write Checkpoints| SQLite[(travel_planner_checkpoints.db)]
-    LangGraph -.->|4. Stream Tokens + Status Signals| FastAPI
-    FastAPI -.->|5. SSE Stream| Streamlit
-    Streamlit -->|6. GET /travel/state/{thread_id}| FastAPI
-    FastAPI -->|7. Load State| SQLite
-```
-
----
-
 ## Features
 
 ### 1. Live Agent Status Tracker
