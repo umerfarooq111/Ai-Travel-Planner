@@ -301,7 +301,23 @@ def render_agent_status(status):
 def render_summary_cards(state):
     dest = state.get("destination") or "N/A"
     duration = f'{state.get("duration")} Days' if state.get("duration") else "N/A"
-    budget = f'{state.get("budget")} {state.get("currency") or ""}' if state.get("budget") else "N/A"
+    
+    budget_val = state.get("budget")
+    currency = state.get("currency") or ""
+    
+    tool_results = state.get("tool_results") or {}
+    currency_info = tool_results.get("currency", {})
+    
+    if budget_val:
+        if currency_info and "converted_amount" in currency_info:
+            conv_amt = int(currency_info.get("converted_amount"))
+            conv_curr = currency_info.get("to")
+            budget = f'{budget_val:,} {currency} (~{conv_amt:,} {conv_curr})'
+        else:
+            budget = f'{budget_val:,} {currency}'
+    else:
+        budget = "N/A"
+        
     prefs = state.get("preferences") or "Standard Style"
     if len(prefs) > 20:
         prefs = prefs[:17] + "..."
@@ -318,7 +334,7 @@ def render_summary_cards(state):
         </div>
         <div class="summary-item">
             <div class="summary-label">Budget</div>
-            <div class="summary-val">{budget}</div>
+            <div class="summary-val" style="font-size: 13px; line-height: 1.2; word-break: break-all;">{budget}</div>
         </div>
         <div class="summary-item">
             <div class="summary-label">Travel Style</div>
@@ -331,50 +347,89 @@ def render_summary_cards(state):
 # Render Weather and Insights
 def render_weather_and_info(state):
     tool_results = state.get("tool_results") or {}
-    weather = tool_results.get("weather", {}).get("weather")
-    info = tool_results.get("travel", {}).get("info")
+    weather = tool_results.get("weather", {})
+    travel = tool_results.get("travel", {})
     
-    if not weather and not info:
+    if not weather and not travel:
         return
         
     w_col, i_col = st.columns(2)
     
-    if weather:
+    if weather and "temperature" in weather:
+        temp = weather.get("temperature")
+        feels_like = weather.get("feels_like")
+        cond = weather.get("condition")
+        desc = weather.get("description", "").title()
+        humidity = weather.get("humidity")
+        
+        w_icons = {
+            "Clear": "☀️",
+            "Clouds": "☁️",
+            "Rain": "🌧️",
+            "Drizzle": "🌦️",
+            "Thunderstorm": "⛈️",
+            "Snow": "❄️",
+            "Mist": "🌫️",
+            "Smoke": "🌫️",
+            "Haze": "🌫️",
+            "Dust": "🌫️",
+            "Fog": "🌫️"
+        }
+        icon = w_icons.get(cond, "🌤️")
+        
         with w_col:
             st.markdown(f"""
             <div class="travel-card weather-card">
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                    <span style="font-size: 20px;">🌤️</span>
-                    <span style="font-size: 14px; font-weight: 600;">Destination Weather</span>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 20px;">{icon}</span>
+                        <span style="font-size: 14px; font-weight: 600;">Destination Weather</span>
+                    </div>
+                    <span style="font-size: 11px; padding: 2px 6px; background: rgba(56, 189, 248, 0.2); border-radius: 4px; color: #38bdf8; font-weight: 500;">{cond}</span>
                 </div>
-                <div style="font-size: 18px; font-weight: 700; color: var(--primary-color); margin-bottom: 4px;">
-                    {weather}
+                <div style="font-size: 24px; font-weight: 700; color: var(--primary-color); margin-bottom: 2px;">
+                    {temp}°C
+                </div>
+                <div style="font-size: 12px; color: var(--text-color); margin-bottom: 4px;">
+                    Feels like {feels_like}°C • {desc}
                 </div>
                 <div style="font-size: 11px; color: rgba(248, 250, 252, 0.5);">
-                    Real-time weather snapshot for travel planning.
+                    💧 Humidity: {humidity}%
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
-    if info:
+    if travel and "capital" in travel:
+        country_name = travel.get("country")
+        capital = travel.get("capital")
+        currency = travel.get("currency")
+        pop = travel.get("population", 0)
+        pop_fmt = f"{pop:,}" if pop else "N/A"
+        langs = ", ".join(travel.get("language", []))
+        flag_url = travel.get("flag")
+        
         with i_col:
-            short_info = info
-            if len(short_info) > 130:
-                short_info = short_info[:127] + "..."
             st.markdown(f"""
             <div class="travel-card info-card">
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                    <span style="font-size: 20px;">🏛️</span>
-                    <span style="font-size: 14px; font-weight: 600;">Local Insights</span>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 20px;">🏛️</span>
+                        <span style="font-size: 14px; font-weight: 600;">Country Details</span>
+                    </div>
+                    {f'<img src="{flag_url}" style="height: 18px; border-radius: 2px; border: 1px solid rgba(255,255,255,0.1);">' if flag_url else ''}
+                </div>
+                <div style="font-size: 16px; font-weight: 700; color: #a78bfa; margin-bottom: 4px;">
+                    {country_name}
                 </div>
                 <div style="font-size: 12px; color: var(--text-color); line-height: 1.4; margin-bottom: 4px;">
-                    {short_info}
+                    🗣️ Lang: {langs} • Capital: {capital}
                 </div>
-                <div style="font-size: 11px; color: rgba(248, 250, 252, 0.4);">
-                    Source: Destination database
+                <div style="font-size: 11px; color: rgba(248, 250, 252, 0.5);">
+                    👥 Pop: {pop_fmt} • 💱 Currency: {currency}
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
 
 # Render Budget Allocation Progress
 def render_budget_breakdown(state):
@@ -519,7 +574,7 @@ with col_dash:
     else:
         st.markdown("""
         <div style="text-align: center; padding: 12px; color: rgba(248, 250, 252, 0.3); border: 1px dashed var(--border-color); border-radius: 8px; margin-bottom: 20px; font-size: 12px;">
-            🤖 Agent Idle. Waiting for request.
+            Agent Idle. Waiting for request.
         </div>
         """, unsafe_allow_html=True)
         

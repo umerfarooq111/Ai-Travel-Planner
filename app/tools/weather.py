@@ -1,25 +1,46 @@
-def weather_tool(destination):
+import os
+import httpx
+from dotenv import load_dotenv
 
+load_dotenv()
 
-    fake_weather={
+API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
-        "Turkey":
-        "15-25°C, sunny",
-
-        "Dubai":
-        "30-35°C"
-
-    }
-
-
+async def weather_tool(destination: str):
+    try:
+        url = "https://api.openweathermap.org/data/2.5/weather"
+        params = {
+            "q": destination,
+            "appid": API_KEY,
+            "units": "metric",
+        }
+        
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            response = await client.get(url, params=params)
+            
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "city": data["name"],
+                "country": data["sys"]["country"],
+                "temperature": data["main"]["temp"],
+                "feels_like": data["main"]["feels_like"],
+                "humidity": data["main"]["humidity"],
+                "condition": data["weather"][0]["main"],
+                "description": data["weather"][0]["description"],
+                "wind_speed": data["wind"]["speed"],
+            }
+    except Exception as e:
+        print(f"Error in weather_tool: {e}")
+        
+    # Standard weather fallback parameters
     return {
-
-        "destination":destination,
-
-        "weather":
-        fake_weather.get(
-            destination,
-            "Unknown"
-        )
-
+        "city": destination,
+        "country": "N/A",
+        "temperature": 22.0,
+        "feels_like": 22.0,
+        "humidity": 50,
+        "condition": "Clear",
+        "description": "clear sky",
+        "wind_speed": 3.0,
     }

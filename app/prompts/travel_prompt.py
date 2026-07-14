@@ -16,5 +16,4 @@ Generate:
 3. Estimated budget breakdown
 4. Travel tips
 Make the response practical and realistic.
-
 """
