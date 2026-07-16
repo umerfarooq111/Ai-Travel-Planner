@@ -2,10 +2,9 @@ import os
 import sqlite3
 import sys
 import uuid
-from datetime import date, timedelta
-
 import requests
 import streamlit as st
+from datetime import date, timedelta
 
 st.set_page_config(
     page_title="AeroPlan AI — Simple Travel Planner",
@@ -94,6 +93,19 @@ def render_sidebar():
             st.session_state.builder_budget = 2000
             st.session_state.builder_currency = "USD"
             st.session_state.builder_pref = ""
+            st.rerun()
+
+        st.caption("User ID Settings")
+        user_id_val = st.text_input(
+            "User ID",
+            value=st.session_state.session_id,
+            placeholder="Enter User ID for history"
+        )
+        if user_id_val != st.session_state.session_id:
+            st.session_state.session_id = user_id_val
+            st.session_state.messages = []
+            st.session_state.agent_status = None
+            st.session_state.loaded_state = {}
             st.rerun()
 
         st.caption("1. Select a Travel Style")
@@ -368,11 +380,11 @@ def render_budget_breakdown(budget: float, currency: str):
 
 
 def get_assistant_stream(user_query: str, user_id: str, status_slot):
-    url = "http://127.0.0.1:8000/travel/chat/stream"
+    url = "http://127.0.0.1:8000/chat"
     try:
         response = requests.post(
             url,
-            json={"user_query": user_query, "user_id": user_id},
+            json={"message": user_query, "user_id": user_id},
             stream=True,
             timeout=120,
         )

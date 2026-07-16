@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request
 from sse_starlette.sse import EventSourceResponse
 
 from app.agent.state import build_initial_state
-from app.api.schemas import TravelRequest
+from app.api.schemas import TravelRequest, ChatRequest
 from app.streaming.token_stream import token_stream
 
 router = APIRouter()
@@ -13,7 +13,31 @@ async def travel_chat(travel_req: TravelRequest, request: Request):
     graph = request.app.state.graph
     user_id = travel_req.user_id or "anonymous"
     config = {"configurable": {"thread_id": user_id}}
-    state = build_initial_state(travel_req.user_query, user_id)
+    
+    snapshot = await graph.aget_state(config)
+    if snapshot and snapshot.values:
+        state = {"user_query": travel_req.user_query}
+    else:
+        state = build_initial_state(travel_req.user_query, user_id)
+
+    async def event_generator():
+        async for token in token_stream(state, graph, config):
+            yield {"event": "token", "data": token}
+
+    return EventSourceResponse(event_generator())
+
+
+@router.post("/chat")
+async def chat_endpoint(chat_req: ChatRequest, request: Request):
+    graph = request.app.state.graph
+    user_id = chat_req.user_id
+    config = {"configurable": {"thread_id": user_id}}
+
+    snapshot = await graph.aget_state(config)
+    if snapshot and snapshot.values:
+        state = {"user_query": chat_req.message}
+    else:
+        state = build_initial_state(chat_req.message, user_id)
 
     async def event_generator():
         async for token in token_stream(state, graph, config):

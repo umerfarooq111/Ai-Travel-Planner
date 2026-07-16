@@ -1,4 +1,6 @@
 import asyncio
+from pydantic import BaseModel, Field
+from typing import Optional
 
 from app.llm.model import model
 from app.tools.currency import currency_converter
@@ -7,6 +9,13 @@ from app.optimization.toon import encode_toon
 from app.prompts.travel_prompt import TRAVEL_PLANNER_PROMPT
 from app.schemas.travel import TravelRequirements
 from app.tools.weather import weather_tool
+
+
+class BudgetIntent(BaseModel):
+    intent_description: str = Field(description="Description of the user's intent regarding the budget.")
+    adjust_budget: bool = Field(description="True if the user wants to increase or decrease the budget, False otherwise.")
+    budget_multiplier: float = Field(default=1.0, description="Multiplier to adjust the budget (e.g. 0.7 to make it cheaper, 1.3 to make it more premium/expensive).")
+    explicit_budget: Optional[int] = Field(default=None, description="Explicit new budget if specified in the user request.")
 
 
 def requirement_analyzer(state):
@@ -28,21 +37,53 @@ def requirement_analyzer(state):
     structured_model = model.with_structured_output(TravelRequirements)
     response = structured_model.invoke(prompt)
 
-    updates = {
-        "destination": response.destination,
-        "duration": response.duration,
-        "budget": response.budget,
-        "currency": response.currency,
-        "preferences": response.preferences or "",
-    }
+    updates = {}
+    if response.destination:
+        updates["destination"] = response.destination
+    if response.duration:
+        updates["duration"] = response.duration
+    if response.budget:
+        updates["budget"] = response.budget
+    if response.currency:
+        updates["currency"] = response.currency
+    if response.preferences:
+        updates["preferences"] = response.preferences
 
-    compressed = encode_toon({**state, **updates})
+    merged_state = {**state, **updates}
+    compressed = encode_toon(merged_state)
     print("\nCompressed State:")
     print(compressed)
     return updates
 
 
 def itinerary_generator(state):
+    budget = state.get("budget") or 2000
+    currency = state.get("currency") or "USD"
+    
+    # 1. LLM-derived budget intent analysis (runs if there is a previous itinerary)
+    if state.get("itinerary") and budget:
+        intent_prompt = f"""
+        Analyze the user's travel request to determine if they want to adjust the budget of their trip.
+        Current User Request: "{state["user_query"]}"
+        Current Budget: {budget} {currency}
+        
+        If the user wants to make the trip cheaper or reduce the budget, set adjust_budget=True and budget_multiplier to a value less than 1.0 (e.g. 0.7 for 30% cheaper).
+        If the user wants a more premium/expensive trip, set adjust_budget=True and budget_multiplier to a value greater than 1.0 (e.g. 1.3).
+        If the user specifies an explicit new budget number, set explicit_budget to that value.
+        Otherwise, set adjust_budget=False and budget_multiplier=1.0.
+        """
+        try:
+            structured_model = model.with_structured_output(BudgetIntent)
+            intent = structured_model.invoke(intent_prompt)
+            if intent.adjust_budget:
+                if intent.explicit_budget:
+                    budget = intent.explicit_budget
+                else:
+                    budget = int(budget * intent.budget_multiplier)
+                print(f"\n[LLM Budget Update] Intent: {intent.intent_description}, New Budget: {budget}")
+        except Exception as e:
+            print(f"Error in budget intent analysis: {e}")
+
     user_profile = state.get("user_profile") or {}
     profile_context = ""
     if user_profile:
@@ -54,10 +95,11 @@ User profile:
 - Average budget: {user_profile.get("average_budget", "N/A")} {user_profile.get("preferred_currency", "")}
 """
 
+    # 2. Pass ONLY relevant current state (destination, duration, budget, currency, tool_results) to the prompt.
     prompt = TRAVEL_PLANNER_PROMPT.format(
         destination=state["destination"],
         duration=state["duration"],
-        budget=state["budget"],
+        budget=budget,
         currency=state["currency"],
         tool_results=state["tool_results"],
     )
@@ -75,6 +117,7 @@ User profile:
 
     itinerary = "".join(content_parts)
     return {
+        "budget": budget,
         "itinerary": itinerary,
         "final_response": itinerary,
     }

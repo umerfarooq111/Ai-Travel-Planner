@@ -1,6 +1,6 @@
 # AeroPlan AI - Premium Agentic Travel Planner & Dashboard
 
-AeroPlan AI is a state-of-the-art, database-backed personal travel planning application. It features a modern **LangGraph** multi-step agent workflow, **FastAPI Server-Sent Events (SSE)** token and status streaming, asynchronous **SQLite checkpoint persistence**, and a premium **Streamlit** dashboard inspired by ChatGPT, Perplexity AI, Airbnb, and Google Travel.
+AeroPlan AI is a state-of-the-art personal travel planning application. It features a modern **LangGraph** multi-step agent workflow, **FastAPI Server-Sent Events (SSE)** token and status streaming, in-memory **MemorySaver conversation checkpoints**, and a premium **Streamlit** dashboard inspired by ChatGPT, Perplexity AI, Airbnb, and Google Travel.
 
 ---
 
@@ -23,15 +23,15 @@ The interface displays a visual tracker showing the active step of the AI agent 
 *   Floating bottom-aligned text input that automatically locks during active streaming to prevent thread pollution.
 
 ### 3. Travel Intelligence Dashboard
-The right side of the screen is a functional control board displaying structured info from the planning database:
+The right side of the screen is a functional control board displaying structured info from the planning state:
 *   **Summary Metric Cards**: At-a-glance grids for Destination, Duration, Budget, and Travel Style.
 *   **Dynamic Weather & Info Cards**: Color-coded local climate snapshots and local travel advisories/insights gathered by tools.
 *   **Budget Allocation Breakdown**: Visual division of your custom budget (Accommodation 40%, Food & Dining 25%, Transportation 20%, Activities 15%) showing exact currency amounts and progress bars.
 *   **Interactive Itinerary Explorer**: Switch between a clean day-by-day expandable accordion and a raw markdown tab.
 
-### 4. Session Persistence & History
-*   Fully database-backed checkpointer stores graph state dynamically in `travel_planner_checkpoints.db`.
-*   A sidebar selector queries the database to list all your **Recent Trips**. Selecting a past trip instantly restores its exact chat logs, dashboard metrics, and itinerary plans.
+### 4. Stateful Conversation Memory
+*   Fully in-memory conversation memory (`MemorySaver`) checkpointer persists graph states dynamically using user threads.
+*   The Streamlit UI sidebar features a **User ID** settings field, allowing you to load past conversations, reply to existing itineraries (e.g., saying "Make it cheaper"), and update plans statefully.
 
 ### 5. Saved Preferences Profiles
 *   Sidebar pills let you choose a style profile (e.g., **Foodie Explorer**, **History Buff**, **Relaxed Leisure**, **Active Adventure**) to instantly populate the builder's preferences.
@@ -43,10 +43,21 @@ The right side of the screen is a functional control board displaying structured
 
 ---
 
-## 🔌 API Endpoints
+## API Endpoints
+
+### `POST /chat`
+Initiates a conversational-memory enabled travel planning stream.
+*   **Request Payload**:
+    ```json
+    {
+      "user_id": "traveler_abcd12",
+      "message": "Plan a 5 day trip to Turkey with budget of 2000 USD"
+    }
+    ```
+*   **Response**: EventSource stream yielding text tokens and status markers (`__STATUS__:analyzer`, `__STATUS__:tools`, etc.).
 
 ### `POST /travel/chat/stream`
-Initiates the LangGraph run and yields SSE chunks.
+Legacy SSE streaming endpoint using `TravelRequest`.
 *   **Request Payload**:
     ```json
     {
@@ -54,10 +65,10 @@ Initiates the LangGraph run and yields SSE chunks.
       "user_id": "traveler_abcd12"
     }
     ```
-*   **Response**: EventSource stream yielding text tokens and status markers (`__STATUS__:analyzer`, `__STATUS__:tools`, etc.).
+*   **Response**: EventSource stream yielding text tokens and status markers.
 
 ### `GET /travel/state/{thread_id}`
-Loads the current checkpoint values for a given traveler.
+Loads the current memory state for a given user thread ID.
 *   **Response Payload**:
     ```json
     {
@@ -85,12 +96,12 @@ Loads the current checkpoint values for a given traveler.
 ├── app/
 │   ├── agent/            # LangGraph nodes, state definition, and workflow compile
 │   │   ├── decision.py   # Decision logic for required tools
-│   │   ├── graph.py      # Main graph assembly with Sqlite checkpointer
-│   │   ├── nodes.py      # LLM invocation and tool call wrappers
+│   │   ├── graph.py      # Main graph assembly with MemorySaver checkpointer
+│   │   ├── nodes.py      # LLM invocation, budget analysis, and tool call wrappers
 │   │   └── state.py      # TravelState TypedDict schema
 │   ├── api/              # FastAPI routers and Pydantic schemas
 │   │   ├── routes.py     # Stream SSE and State retrieval GET routes
-│   │   └── schemas.py    # TravelRequest validator
+│   │   └── schemas.py    # TravelRequest & ChatRequest validators
 │   ├── llm/              # LLM client setup (Gemini 2.5 Flash)
 │   ├── prompts/          # Itinerary prompt templates
 │   ├── streaming/        # SSE event streaming and token parsers

@@ -1,4 +1,5 @@
 from langgraph.graph import END, START, StateGraph
+from langgraph.checkpoint.memory import MemorySaver
 
 from app.agent.decision import decision_node
 from app.agent.nodes import itinerary_generator, requirement_analyzer, tool_executor
@@ -18,3 +19,6 @@ workflow.add_edge("preference", "decision")
 workflow.add_edge("decision", "tools")
 workflow.add_edge("tools", "planner")
 workflow.add_edge("planner", END)
+
+checkpointer = MemorySaver()
+graph = workflow.compile(checkpointer=checkpointer)

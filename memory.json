@@ -46,5 +46,30 @@
         "interests": [],
         "average_budget": 0,
         "preferred_currency": "PKR"
+    },
+    "test_mem_user_123": {
+        "user_id": "test_mem_user_123",
+        "travel_style": "cheaper",
+        "preferred_transport": "",
+        "preferred_accommodation": "",
+        "favorite_destinations": [
+            "Turkey",
+            "unknown"
+        ],
+        "interests": [],
+        "average_budget": 2000,
+        "preferred_currency": "unknown"
+    },
+    "trip_42f86b12": {
+        "user_id": "trip_42f86b12",
+        "travel_style": "culinary trip",
+        "preferred_transport": "",
+        "preferred_accommodation": "",
+        "favorite_destinations": [
+            "Tokyo"
+        ],
+        "interests": [],
+        "average_budget": 4000,
+        "preferred_currency": "EUR"
     }
 }
