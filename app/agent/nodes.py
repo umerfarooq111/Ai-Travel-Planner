@@ -1,231 +1,113 @@
-from app.llm.model import model
-
-from app.optimization.toon import encode_toon
-
-from app.tools.weather import weather_tool
-from app.tools.currency import currency_converter
-from app.tools.travel import destination_info
-
-from app.prompts.travel_prompt import TRAVEL_PLANNER_PROMPT
-
-from app.schemas.travel import TravelRequirements
-
 import asyncio
 
+from app.llm.model import model
+from app.tools.currency import currency_converter
+from app.tools.travel import destination_info
+from app.optimization.toon import encode_toon
+from app.prompts.travel_prompt import TRAVEL_PLANNER_PROMPT
+from app.schemas.travel import TravelRequirements
+from app.tools.weather import weather_tool
 
 
 def requirement_analyzer(state):
-
-    state.setdefault("destination", None)
-    state.setdefault("duration", None)
-    state.setdefault("budget", None)
-    state.setdefault("currency", None)
-    state.setdefault("preferences", "")
-
-    state.setdefault("itinerary", None)
-    state.setdefault("final_response", None)
-
-    state.setdefault("required_tools", [])
-    state.setdefault("tool_results", {})
-
-
     prompt = f"""
-You are a travel requirement analyzer.
+    You are a travel requirement analyzer.
 
-Extract the following information:
+    Extract the following information:
 
-- destination
-- duration
-- budget
-- currency
-- preferences
+    - destination
+    - duration
+    - budget
+    - currency
+    - preferences
 
+    User request:
 
-User request:
+    {state["user_query"]}
+    """
+    structured_model = model.with_structured_output(TravelRequirements)
+    response = structured_model.invoke(prompt)
 
-{state["user_query"]}
-"""
+    updates = {
+        "destination": response.destination,
+        "duration": response.duration,
+        "budget": response.budget,
+        "currency": response.currency,
+        "preferences": response.preferences or "",
+    }
 
-
-    structured_model = model.with_structured_output(
-        TravelRequirements
-    )
-
-
-    response = structured_model.invoke(
-        prompt
-    )
-
-
-    state["destination"] = response.destination
-
-    state["duration"] = response.duration
-
-    state["budget"] = response.budget
-
-    state["currency"] = response.currency
-
-    state["preferences"] = response.preferences
-
-
-    compressed = encode_toon(state)
-
-
+    compressed = encode_toon({**state, **updates})
     print("\nCompressed State:")
     print(compressed)
-
-
-    return state
-
-
+    return updates
 
 
 def itinerary_generator(state):
+    user_profile = state.get("user_profile") or {}
+    profile_context = ""
+    if user_profile:
+        favorites = ", ".join(user_profile.get("favorite_destinations", []))
+        profile_context = f"""
+User profile:
+- Travel style: {user_profile.get("travel_style", "N/A")}
+- Favorite destinations: {favorites or "N/A"}
+- Average budget: {user_profile.get("average_budget", "N/A")} {user_profile.get("preferred_currency", "")}
+"""
 
     prompt = TRAVEL_PLANNER_PROMPT.format(
-
         destination=state["destination"],
-
         duration=state["duration"],
-
         budget=state["budget"],
-
         currency=state["currency"],
-
-        tool_results=state["tool_results"]
-
+        tool_results=state["tool_results"],
     )
+    if profile_context:
+        prompt = profile_context + "\n" + prompt
 
+    content_parts = []
+    for chunk in model.stream(prompt):
+        if isinstance(chunk.content, list):
+            text = chunk.content[0].get("text", "") if chunk.content else ""
+        else:
+            text = chunk.content or ""
+        if text:
+            content_parts.append(text)
 
-    response = model.invoke(prompt)
-
-
-    if isinstance(response.content, list):
-
-        itinerary = response.content[0]["text"]
-
-    else:
-
-        itinerary = response.content
-
-
-
-    state["itinerary"] = itinerary
-
-    state["final_response"] = itinerary
-
-
-    return state
-
-
-
+    itinerary = "".join(content_parts)
+    return {
+        "itinerary": itinerary,
+        "final_response": itinerary,
+    }
 
 
 async def tool_executor(state):
-
     results = {}
 
-
-    # -------------------------------
-    # STEP 1
-    # Travel information first
-    # -------------------------------
-
     if "travel" in state["required_tools"]:
-
-
-        travel = await destination_info(
-
-            state["destination"]
-
-        )
-
-
+        travel = await destination_info(state["destination"])
         results["travel"] = travel
 
-
-
-    # -------------------------------
-    # STEP 2
-    # Run independent tools parallel
-    # -------------------------------
-
-
     tasks = []
-
     names = []
 
-
-
     if "weather" in state["required_tools"]:
-
-
-        tasks.append(
-
-            weather_tool(
-
-                state["destination"]
-
-            )
-
-        )
-
-
+        tasks.append(weather_tool(state["destination"]))
         names.append("weather")
 
-
-
-
     if "currency" in state["required_tools"]:
-
-
-        destination_currency = (
-
-            results["travel"]["currency"]
-
-        )
-
-
+        destination_currency = results.get("travel", {}).get("currency", "USD")
         tasks.append(
-
             currency_converter(
-
                 amount=state["budget"],
-
                 from_currency=state["currency"],
-
-                to_currency=destination_currency
-
+                to_currency=destination_currency,
             )
-
         )
-
-
         names.append("currency")
 
-
-
-
     if tasks:
-
-
-        responses = await asyncio.gather(
-
-            *tasks
-
-        )
-
-
-        for name, response in zip(
-            names,
-            responses
-        ):
-
+        responses = await asyncio.gather(*tasks)
+        for name, response in zip(names, responses):
             results[name] = response
 
-
-
-    state["tool_results"] = results
-
-
-    return state
+    return {"tool_results": results}

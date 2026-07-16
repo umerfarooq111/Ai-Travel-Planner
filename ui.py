@@ -1,592 +1,624 @@
-import streamlit as st
-import requests
-import uuid
-import sys
-import re
-import sqlite3
 import os
+import sqlite3
+import sys
+import uuid
+from datetime import date, timedelta
 
-# Configure page layout and style
+import requests
+import streamlit as st
+
 st.set_page_config(
-    page_title="AeroPlan AI - Travel Assistant",
-    page_icon=":material/travel_explore:",
+    page_title="AeroPlan AI — Simple Travel Planner",
+    page_icon=":material/flight_takeoff:",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Helper function to load custom CSS
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+
+
 def load_css():
     css_path = os.path.join(os.path.dirname(__file__), "assets", "style.css")
     if os.path.exists(css_path):
         with open(css_path, "r", encoding="utf-8") as f:
-            css = f.read()
-            st.html(f"<style>{css}</style>")
+            st.html(f"<style>{f.read()}</style>")
 
-# Inject custom CSS
+
 load_css()
 
-# Backend state fetcher
-def load_session_state(thread_id):
-    url = f"http://127.0.0.1:8000/travel/state/{thread_id}"
+# Travel Style Profiles and their default preferences
+PROFILE_PREFS = {
+    "Foodie Explorer": "Local street food, culinary tours, fine dining, and cooking workshops.",
+    "History Buff": "Museums, historic landmarks, archaeological ruins, and cultural heritage sites.",
+    "Relaxed Leisure": "Spa sessions, beach relaxation, scenic views, and slow-paced exploration.",
+    "Active Adventure": "Hiking trails, nature exploration, outdoor sports, and adventure tours.",
+}
+
+SUGGESTIONS = [
+    "Plan a 5-day trip to Turkey with a budget of 2000 USD",
+    "I want a 7-day culinary trip to Tokyo under 4000 EUR",
+    "Plan a historical tour of Rome for 4 days with 1500 GBP",
+    "Active adventure trip to Switzerland for 6 days with 3000 USD",
+]
+
+
+def load_backend_state(thread_id: str) -> dict:
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(
+            f"http://127.0.0.1:8000/travel/state/{thread_id}",
+            timeout=5,
+        )
         if response.status_code == 200:
             return response.json()
     except Exception:
         pass
     return {}
 
-# Query recent threads from DB
-def get_recent_threads():
+
+def get_saved_trips() -> list[str]:
     try:
         conn = sqlite3.connect("travel_planner_checkpoints.db")
         cursor = conn.cursor()
         cursor.execute("SELECT DISTINCT thread_id FROM checkpoints")
-        threads = [r[0] for r in cursor.fetchall() if r[0]]
+        trips = [row[0] for row in cursor.fetchall() if row[0]]
         conn.close()
-        # Filter out testing names for a cleaner look
-        return [t for t in threads if not t.startswith("test_")]
+        return [trip for trip in trips if not trip.startswith("test_") and not trip.startswith("cli_")]
     except Exception:
         return []
 
-# Session State Initialization
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "session_id" not in st.session_state:
-    st.session_state.session_id = f"traveler_{uuid.uuid4().hex[:6]}"
-if "agent_status" not in st.session_state:
-    st.session_state.agent_status = None
-if "loaded_state" not in st.session_state:
-    st.session_state.loaded_state = {}
 
-# Load current thread's state on first load or session switch
-if "loaded_session_id" not in st.session_state or st.session_state.loaded_session_id != st.session_state.session_id:
-    db_state = load_session_state(st.session_state.session_id)
-    st.session_state.loaded_state = db_state
-    st.session_state.loaded_session_id = st.session_state.session_id
-    
-    # Restore messages from db if itinerary exists
-    if db_state and db_state.get("itinerary") and db_state.get("user_query"):
-        st.session_state.messages = [
-            {"role": "user", "content": db_state.get("user_query")},
-            {"role": "assistant", "content": db_state.get("itinerary")}
-        ]
-        st.session_state.agent_status = "completed"
-    else:
-        st.session_state.messages = []
-        st.session_state.agent_status = None
-
-# Custom Header Render
-def render_header():
-    st.markdown("""
-    <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 0; margin-bottom: 25px; border-bottom: 1px solid var(--border-color);">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);">
-                <span style="font-size: 22px; color: white;">✈️</span>
+def render_sidebar():
+    with st.sidebar:
+        st.markdown(
+            """
+            <div class="sidebar-brand">
+                <div class="sidebar-brand-icon">✈</div>
+                <div>
+                    <h1>AeroPlan AI</h1>
+                    <p>Travel Planner</p>
+                </div>
             </div>
-            <div>
-                <h2 style="margin: 0; font-size: 22px; font-weight: 700; background: linear-gradient(to right, #38bdf8, #0284c7); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">AeroPlan AI</h2>
-                <span style="font-size: 11px; color: rgba(248, 250, 252, 0.5);">Premium Agentic Travel Planner & Dashboard</span>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if st.button(":material/add: New Trip", width="stretch", type="primary"):
+            st.session_state.session_id = f"trip_{uuid.uuid4().hex[:8]}"
+            st.session_state.messages = []
+            st.session_state.agent_status = None
+            st.session_state.loaded_state = {}
+            st.session_state.selected_profile = None
+            st.session_state.builder_dest = "Paris"
+            st.session_state.builder_days = 5
+            st.session_state.builder_budget = 2000
+            st.session_state.builder_currency = "USD"
+            st.session_state.builder_pref = ""
+            st.rerun()
+
+        st.caption("1. Select a Travel Style")
+        
+        # Style Profile segmented control
+        profile = st.segmented_control(
+            "Style profile",
+            options=list(PROFILE_PREFS.keys()),
+            key="selected_profile",
+            label_visibility="collapsed",
+        )
+        
+        # Reactive update of builder preferences
+        if "last_profile" not in st.session_state:
+            st.session_state.last_profile = None
+            
+        if st.session_state.selected_profile != st.session_state.last_profile:
+            st.session_state.last_profile = st.session_state.selected_profile
+            if st.session_state.selected_profile:
+                st.session_state.builder_pref = PROFILE_PREFS[st.session_state.selected_profile]
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.caption("2. Customize Criteria")
+        
+        # Builder Form Elements
+        builder_dest = st.text_input(
+            "Destination", 
+            value=st.session_state.get("builder_dest", "Paris"),
+            placeholder="e.g. Paris, Tokyo, Turkey"
+        )
+        st.session_state.builder_dest = builder_dest
+        
+        builder_days = st.number_input(
+            "Duration (days)",
+            min_value=1,
+            max_value=30,
+            value=st.session_state.get("builder_days", 5)
+        )
+        st.session_state.builder_days = builder_days
+        
+        col_b1, col_b2 = st.columns([2, 1])
+        with col_b1:
+            builder_budget = st.number_input(
+                "Budget",
+                min_value=100,
+                max_value=100000,
+                value=st.session_state.get("builder_budget", 2000)
+            )
+            st.session_state.builder_budget = builder_budget
+        with col_b2:
+            builder_currency = st.selectbox(
+                "Currency",
+                ["USD", "EUR", "GBP", "PKR", "TRY", "AED"],
+                index=0
+            )
+            st.session_state.builder_currency = builder_currency
+            
+        builder_pref = st.text_area(
+            "Preferences",
+            value=st.session_state.get("builder_pref", ""),
+            placeholder="e.g. historic tours, fine dining, beach relaxation",
+            height=80
+        )
+        st.session_state.builder_pref = builder_pref
+
+        if st.button(":material/send: Generate Itinerary", type="primary", width="stretch"):
+            prompt = (
+                f"Plan a {builder_days}-day trip to {builder_dest} "
+                f"with a budget of {builder_budget} {builder_currency}. "
+                f"My preferences are: {builder_pref if builder_pref else 'standard sightseeing'}."
+            )
+            st.session_state.messages = []
+            st.session_state.agent_status = "analyzer"
+            st.session_state.pending_query = prompt
+            st.rerun()
+
+        st.markdown("<hr style='margin: 12px 0; border: none; border-top: 1px solid rgba(255,255,255,0.08);'>", unsafe_allow_html=True)
+        st.caption("Recent Itineraries")
+
+        saved_trips = get_saved_trips()
+        if saved_trips:
+            for trip in saved_trips[:8]:
+                label = trip.replace("trip_", "Trip ").replace("traveler_", "Trip ")
+                if st.button(label, key=f"trip_btn_{trip}", width="stretch"):
+                    st.session_state.session_id = trip
+                    st.session_state.messages = []
+                    st.session_state.agent_status = "completed"
+                    st.session_state.loaded_state = load_backend_state(trip)
+                    
+                    # Populate builder with this trip state if available
+                    state_vals = st.session_state.loaded_state
+                    if state_vals.get("destination"):
+                        st.session_state.builder_dest = state_vals.get("destination")
+                        st.session_state.builder_days = state_vals.get("duration", 5)
+                        st.session_state.builder_budget = state_vals.get("budget", 2000)
+                        st.session_state.builder_currency = state_vals.get("currency", "USD")
+                        st.session_state.builder_pref = state_vals.get("preferences", "")
+                    
+                    st.rerun()
+        else:
+            st.caption("No previous trips yet.")
+
+
+def render_status_tracker(status: str | None):
+    if not status:
+        return
+
+    # Map the current agent status node to 4 steps
+    step_states = {
+        "step1": "pending", "step2": "pending", "step3": "pending", "step4": "pending",
+        "line1": "", "line2": "", "line3": ""
+    }
+
+    if status in ("analyzer", "preference"):
+        step_states["step1"] = "active"
+    elif status in ("decision", "tools"):
+        step_states["step1"] = "completed"
+        step_states["step2"] = "active"
+        step_states["line1"] = "active"
+    elif status == "planner":
+        step_states["step1"] = "completed"
+        step_states["step2"] = "completed"
+        step_states["step3"] = "active"
+        step_states["line1"] = "completed"
+        step_states["line2"] = "active"
+    elif status == "completed":
+        step_states["step1"] = "completed"
+        step_states["step2"] = "completed"
+        step_states["step3"] = "completed"
+        step_states["step4"] = "completed"
+        step_states["line1"] = "completed"
+        step_states["line2"] = "completed"
+        step_states["line3"] = "completed"
+
+    st.markdown(
+        f"""
+        <div class="status-tracker-container">
+            <div class="steps-tracker">
+                <div class="step {step_states['step1']}">
+                    <div class="step-num">{"✓" if step_states['step1'] == "completed" else "1"}</div>
+                    <div class="step-name">Analyzing</div>
+                </div>
+                <div class="step-line {step_states['line1']}"></div>
+                <div class="step {step_states['step2']}">
+                    <div class="step-num">{"✓" if step_states['step2'] == "completed" else "2"}</div>
+                    <div class="step-name">Searching</div>
+                </div>
+                <div class="step-line {step_states['line2']}"></div>
+                <div class="step {step_states['step3']}">
+                    <div class="step-num">{"✓" if step_states['step3'] == "completed" else "3"}</div>
+                    <div class="step-name">Planning</div>
+                </div>
+                <div class="step-line {step_states['line3']}"></div>
+                <div class="step {step_states['step4']}">
+                    <div class="step-num">{"✓" if step_states['step4'] == "completed" else "4"}</div>
+                    <div class="step-name">Completed</div>
+                </div>
             </div>
         </div>
-        <div style="display: flex; align-items: center; gap: 15px;">
-            <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; background: var(--secondary-background-color); padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-color);">
-                <span style="color: #22c55e;">●</span> Live Backend Connected
-            </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_typing_indicator():
+    st.markdown(
+        """
+        <div class="typing-indicator">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
-# Helper function to parse itinerary days
-def parse_itinerary_days(itinerary_text):
-    if not itinerary_text:
-        return [], ""
-    
-    # Try to find Days
-    pattern = r'(?:\n|^)(?:##\s*|###\s*|\*\*|)(Day\s+\d+[:\-\s\w]*)(?:\*\*|)(?:\n|$)'
-    parts = re.split(pattern, itinerary_text)
-    
-    days = []
-    if len(parts) > 1:
-        intro = parts[0].strip()
-        for i in range(1, len(parts), 2):
-            day_title = parts[i].strip()
-            day_content = parts[i+1].strip() if i+1 < len(parts) else ""
-            days.append({"title": day_title, "content": day_content})
-        return days, intro
-    return [], itinerary_text
 
-# Get assistant stream and handle agent status
-def get_assistant_stream(user_query, user_id, status_placeholder):
+def render_summary_metrics(destination: str, duration: int, budget: float, currency: str, preferences: str):
+    style = preferences if preferences else "General"
+    if len(style) > 20:
+        style = style[:18] + "..."
+        
+    formatted_budget = f"{currency} {budget:,.0f}" if currency else f"${budget:,.0f}"
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Destination", destination or "N/A", border=True)
+    with col2:
+        st.metric("Duration", f"{duration or 0} Days", border=True)
+    with col3:
+        st.metric("Total Budget", formatted_budget, border=True)
+    with col4:
+        st.metric("Travel Style", style, border=True)
+
+
+def render_weather_and_info(tool_results: dict):
+    if not tool_results:
+        return
+        
+    weather = tool_results.get("weather", {})
+    travel = tool_results.get("travel", {})
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        with st.container(border=True):
+            st.markdown("**🌦️ Destination Weather**")
+            if weather:
+                temp = weather.get("temperature", 20.0)
+                cond = weather.get("condition", "Clear")
+                desc = weather.get("description", "clear sky")
+                feels = weather.get("feels_like", 20.0)
+                humidity = weather.get("humidity", 50)
+                wind = weather.get("wind_speed", 3.0)
+                city = weather.get("city", "Local")
+                
+                # Temperature info in a simple text layout
+                st.markdown(f"### {temp:.1f}°C")
+                st.caption(f"{cond} ({desc}) in {city}")
+                st.markdown(
+                    f"""
+                    - **Feels Like:** {feels:.1f}°C
+                    - **Humidity:** {humidity}%
+                    - **Wind Speed:** {wind} m/s
+                    """
+                )
+            else:
+                st.write("Weather insights not available.")
+            
+    with col2:
+        with st.container(border=True):
+            st.markdown("**🌐 Destination Guide**")
+            if travel:
+                country = travel.get("country", "Unknown")
+                capital = travel.get("capital", "N/A")
+                curr = travel.get("currency", "USD")
+                langs = ", ".join(travel.get("language", ["Local"]))
+                pop = travel.get("population", 0)
+                
+                st.markdown(f"### {country}")
+                st.caption("Country Profile & Guide")
+                st.markdown(
+                    f"""
+                    - **Capital City:** {capital}
+                    - **Local Currency:** {curr}
+                    - **Languages:** {langs}
+                    - **Population:** {pop:,}
+                    """
+                )
+            else:
+                st.write("Country details not available.")
+
+
+def render_budget_breakdown(budget: float, currency: str):
+    if not budget:
+        return
+        
+    categories = [
+        {"name": "Accommodation (40%)", "pct": 40},
+        {"name": "Food & Dining (25%)", "pct": 25},
+        {"name": "Transportation (20%)", "pct": 20},
+        {"name": "Activities (15%)", "pct": 15},
+    ]
+    
+    st.markdown("#### Budget Breakdown")
+    
+    with st.container(border=True):
+        for cat in categories:
+            amount = budget * (cat["pct"] / 100)
+            formatted = f"{currency} {amount:,.2f}" if currency else f"${amount:,.2f}"
+            st.progress(cat["pct"] / 100, text=f"**{cat['name']}** — {formatted}")
+
+
+def get_assistant_stream(user_query: str, user_id: str, status_slot):
     url = "http://127.0.0.1:8000/travel/chat/stream"
     try:
         response = requests.post(
             url,
             json={"user_query": user_query, "user_id": user_id},
             stream=True,
-            timeout=120
+            timeout=120,
         )
         if response.status_code != 200:
-            yield f"❌ **Backend Error**: API returned status code {response.status_code}"
+            yield "I'm having trouble reaching our travel service right now. Please try again in a moment."
             return
-        
+
         for line in response.iter_lines():
-            if line:
-                decoded_line = line.decode('utf-8')
-                if decoded_line.startswith("data:"):
-                    token = decoded_line[5:].strip()
-                    # Strip surrounding quotes if EventSourceResponse wrapped it
-                    if token.startswith('"') and token.endswith('"'):
-                        token = token[1:-1]
-                    # Replace escaped newlines
-                    token = token.replace('\\n', '\n').replace('\\t', '\t')
-                    
-                    # Intercept status signals
-                    if token.startswith("__STATUS__:"):
-                        status_val = token.split(":")[1]
-                        st.session_state.agent_status = status_val
-                        with status_placeholder:
-                            render_agent_status(status_val)
-                    else:
-                        yield token
-    except Exception as e:
-        yield f"⚠️ **Connection Error**: Could not connect to travel planner API at {url}.\n\n*Error details: {str(e)}*"
+            if not line:
+                continue
+            decoded = line.decode("utf-8")
+            if not decoded.startswith("data:"):
+                continue
 
-# Sidebar configuration
-with st.sidebar:
-    st.markdown("## :material/travel_explore: Navigation & Settings")
-    
-    # Session Persistence Section
-    with st.sidebar.container(border=True):
-        st.markdown("### :material/history: Saved Trips & Sessions")
-        recent_threads = get_recent_threads()
-        
-        selected_thread = st.selectbox(
-            "Select recent trip",
-            options=["New Session"] + recent_threads,
-            index=0 if st.session_state.session_id not in recent_threads else recent_threads.index(st.session_state.session_id) + 1,
-            label_visibility="collapsed"
-        )
-        
-        if selected_thread != "New Session" and selected_thread != st.session_state.session_id:
-            st.session_state.session_id = selected_thread
-            st.session_state.messages = []
-            st.rerun()
-            
-        st.text_input(
-            "Session/Thread ID",
-            value=st.session_state.session_id,
-            key="session_id_input",
-            help="Saves your conversation checkpoints in the SQLite checkpointer database. Enter the same ID to resume later."
-        )
-        
-        if st.session_state.session_id_input != st.session_state.session_id:
-            st.session_state.session_id = st.session_state.session_id_input
-            st.session_state.messages = []
-            st.rerun()
+            token = decoded[5:].strip()
+            if token.startswith('"') and token.endswith('"'):
+                token = token[1:-1]
+            token = token.replace("\\n", "\n").replace("\\t", "\t")
 
-    # Preference Profiles autofill Section
-    with st.sidebar.container(border=True):
-        st.markdown("### :material/psychology: Saved Preferences")
-        profile_options = {
-            "🍕 Foodie Explorer": "focus on local food tourism, cafes, traditional dining, culinary workshops",
-            "🏛️ History Buff": "historical landmarks, museums, architecture, heritage tours, low pace",
-            "🌴 Relaxed Leisure": "luxury beaches, resorts, spa, relaxed pace, minimal walking",
-            "🏔️ Active Adventure": "hiking, outdoor activities, nature reserves, adventure sports, fast pace"
-        }
-        
-        selected_profile = st.pills(
-            "Select travel style profile:",
-            options=list(profile_options.keys()),
-            selection_mode="single",
-            label_visibility="collapsed"
-        )
-        if selected_profile:
-            st.session_state.autofill_prefs = profile_options[selected_profile]
-            st.toast(f"Preferences loaded for {selected_profile}!", icon=":material/thumb_up:")
-
-    # Quick Travel Builder Section
-    with st.sidebar.container(border=True):
-        st.markdown("### :material/edit_note: Quick Travel Builder")
-        dest = st.text_input("Destination", placeholder="e.g. Turkey, Paris, Rome")
-        days = st.slider("Duration (days)", min_value=1, max_value=30, value=5)
-        budget = st.number_input("Budget amount", min_value=1, value=2000, step=100)
-        curr = st.selectbox("Select currency", ["USD", "EUR", "PKR", "GBP"])
-        
-        default_pref_val = st.session_state.get("autofill_prefs", "")
-        prefs = st.text_area("Preferences or style", value=default_pref_val, placeholder="e.g. food tourism, historical places, low pace")
-        
-        if st.button("Generate & Send Prompt", icon=":material/rocket_launch:", width="stretch"):
-            if dest:
-                prompt = f"Plan a {days} day trip to {dest} with budget of {budget} {curr}."
-                if prefs:
-                    prompt += f" Preferences: {prefs}"
-                st.session_state.builder_prompt = prompt
+            if token.startswith("__STATUS__:"):
+                status = token.split(":", 1)[1]
+                st.session_state.agent_status = status
+                with status_slot:
+                    render_status_tracker(status)
             else:
-                st.warning("Please specify a destination in the builder!")
+                yield token
+    except Exception:
+        yield (
+            "I couldn't connect to the travel planner service. "
+            "Make sure the backend is running, then try your search again."
+        )
 
-    # Theme indicator
-    with st.sidebar.container(border=True):
-        st.markdown("### :material/contrast: Light / Dark Mode")
-        st.caption("Auto-adapts to your browser/system preferences. Toggle theme in Streamlit settings (top right ⚙).")
 
-# Render Custom Header
-render_header()
+# ── Session state ──────────────────────────────────────────────────────────
 
-# Layout splitting: Left = Chat, Right = Dashboard
-col_chat, col_dash = st.columns([5, 6], gap="large")
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "session_id" not in st.session_state:
+    st.session_state.session_id = f"trip_{uuid.uuid4().hex[:8]}"
+if "agent_status" not in st.session_state:
+    st.session_state.agent_status = None
+if "loaded_state" not in st.session_state:
+    st.session_state.loaded_state = {}
 
-# Render Live Agent Status component
-def render_agent_status(status):
-    steps = [
-        {"id": "analyzer", "label": "Analyzing"},
-        {"id": "decision", "label": "Searching"},
-        {"id": "tools", "label": "Planning"},
-        {"id": "planner", "label": "Finalizing"},
-    ]
-    
-    active_idx = -1
-    for idx, step in enumerate(steps):
-        if step["id"] == status:
-            active_idx = idx
-            break
-            
-    if status == "completed":
-        active_idx = len(steps)
+# Initialize builder fields
+if "builder_dest" not in st.session_state:
+    st.session_state.builder_dest = "Paris"
+if "builder_days" not in st.session_state:
+    st.session_state.builder_days = 5
+if "builder_budget" not in st.session_state:
+    st.session_state.builder_budget = 2000
+if "builder_currency" not in st.session_state:
+    st.session_state.builder_currency = "USD"
+if "builder_pref" not in st.session_state:
+    st.session_state.builder_pref = ""
+
+# Load database state if session changes
+if (
+    "loaded_session_id" not in st.session_state
+    or st.session_state.loaded_session_id != st.session_state.session_id
+):
+    db_state = load_backend_state(st.session_state.session_id)
+    st.session_state.loaded_state = db_state
+    st.session_state.loaded_session_id = st.session_state.session_id
+    if db_state.get("itinerary") and db_state.get("user_query"):
+        st.session_state.messages = [
+            {"role": "user", "content": db_state["user_query"]},
+            {"role": "assistant", "content": db_state["itinerary"]},
+        ]
+        st.session_state.agent_status = "completed"
         
-    if active_idx == -1:
-        progress_width = 0
+        # Populate builder widgets with loaded state
+        st.session_state.builder_dest = db_state.get("destination", "Paris")
+        st.session_state.builder_days = db_state.get("duration", 5)
+        st.session_state.builder_budget = db_state.get("budget", 2000)
+        st.session_state.builder_currency = db_state.get("currency", "USD")
+        st.session_state.builder_pref = db_state.get("preferences", "")
     else:
-        progress_width = (active_idx / (len(steps) - 1)) * 75
-        if active_idx == len(steps):
-            progress_width = 75
-            
-    html = f"""
-    <div class="status-tracker">
-        <div class="status-line"></div>
-        <div class="status-line-fill" style="width: {progress_width}%;"></div>
+        st.session_state.messages = []
+        st.session_state.agent_status = None
+
+render_sidebar()
+
+# ── Hero ───────────────────────────────────────────────────────────────────
+
+st.markdown(
     """
-    
-    for idx, step in enumerate(steps):
-        step_class = "status-step"
-        icon = str(idx + 1)
-        
-        if status == "completed":
-            step_class += " completed"
-            icon = "✓"
-        elif idx < active_idx:
-            step_class += " completed"
-            icon = "✓"
-        elif idx == active_idx:
-            step_class += " active"
-            if status != "planner":
-                icon = "⚙"
-            else:
-                icon = "✍"
-        
-        if status == "completed" and idx == len(steps) - 1:
-            step_class = "status-step done"
-            
-        html += f"""
-        <div class="{step_class}">
-            <div class="status-circle">{icon}</div>
-            <div class="status-label">{step["label"]}</div>
+    <div class="hero-banner">
+        <div>
+            <h2>Explore the World with AeroPlan AI</h2>
+            <p>Premium Agentic Travel Planner · Dynamic Climate & Budget Analytics · Seamless Itineraries</p>
         </div>
-        """
-        
-    html += "</div>"
-    st.markdown(html, unsafe_allow_html=True)
-
-# Render Summary Cards component
-def render_summary_cards(state):
-    dest = state.get("destination") or "N/A"
-    duration = f'{state.get("duration")} Days' if state.get("duration") else "N/A"
-    
-    budget_val = state.get("budget")
-    currency = state.get("currency") or ""
-    
-    tool_results = state.get("tool_results") or {}
-    currency_info = tool_results.get("currency", {})
-    
-    if budget_val:
-        if currency_info and "converted_amount" in currency_info:
-            conv_amt = int(currency_info.get("converted_amount"))
-            conv_curr = currency_info.get("to")
-            budget = f'{budget_val:,} {currency} (~{conv_amt:,} {conv_curr})'
-        else:
-            budget = f'{budget_val:,} {currency}'
-    else:
-        budget = "N/A"
-        
-    prefs = state.get("preferences") or "Standard Style"
-    if len(prefs) > 20:
-        prefs = prefs[:17] + "..."
-        
-    html = f"""
-    <div class="summary-grid">
-        <div class="summary-item">
-            <div class="summary-label">Destination</div>
-            <div class="summary-val">{dest}</div>
-        </div>
-        <div class="summary-item">
-            <div class="summary-label">Duration</div>
-            <div class="summary-val">{duration}</div>
-        </div>
-        <div class="summary-item">
-            <div class="summary-label">Budget</div>
-            <div class="summary-val" style="font-size: 13px; line-height: 1.2; word-break: break-all;">{budget}</div>
-        </div>
-        <div class="summary-item">
-            <div class="summary-label">Travel Style</div>
-            <div class="summary-val">{prefs}</div>
-        </div>
+        <div class="hero-plane">✈️</div>
     </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-# Render Weather and Insights
-def render_weather_and_info(state):
-    tool_results = state.get("tool_results") or {}
-    weather = tool_results.get("weather", {})
-    travel = tool_results.get("travel", {})
-    
-    if not weather and not travel:
-        return
-        
-    w_col, i_col = st.columns(2)
-    
-    if weather and "temperature" in weather:
-        temp = weather.get("temperature")
-        feels_like = weather.get("feels_like")
-        cond = weather.get("condition")
-        desc = weather.get("description", "").title()
-        humidity = weather.get("humidity")
-        
-        w_icons = {
-            "Clear": "☀️",
-            "Clouds": "☁️",
-            "Rain": "🌧️",
-            "Drizzle": "🌦️",
-            "Thunderstorm": "⛈️",
-            "Snow": "❄️",
-            "Mist": "🌫️",
-            "Smoke": "🌫️",
-            "Haze": "🌫️",
-            "Dust": "🌫️",
-            "Fog": "🌫️"
-        }
-        icon = w_icons.get(cond, "🌤️")
-        
-        with w_col:
-            st.markdown(f"""
-            <div class="travel-card weather-card">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 20px;">{icon}</span>
-                        <span style="font-size: 14px; font-weight: 600;">Destination Weather</span>
-                    </div>
-                    <span style="font-size: 11px; padding: 2px 6px; background: rgba(56, 189, 248, 0.2); border-radius: 4px; color: #38bdf8; font-weight: 500;">{cond}</span>
-                </div>
-                <div style="font-size: 24px; font-weight: 700; color: var(--primary-color); margin-bottom: 2px;">
-                    {temp}°C
-                </div>
-                <div style="font-size: 12px; color: var(--text-color); margin-bottom: 4px;">
-                    Feels like {feels_like}°C • {desc}
-                </div>
-                <div style="font-size: 11px; color: rgba(248, 250, 252, 0.5);">
-                    💧 Humidity: {humidity}%
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-    if travel and "capital" in travel:
-        country_name = travel.get("country")
-        capital = travel.get("capital")
-        currency = travel.get("currency")
-        pop = travel.get("population", 0)
-        pop_fmt = f"{pop:,}" if pop else "N/A"
-        langs = ", ".join(travel.get("language", []))
-        flag_url = travel.get("flag")
-        
-        with i_col:
-            st.markdown(f"""
-            <div class="travel-card info-card">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 20px;">🏛️</span>
-                        <span style="font-size: 14px; font-weight: 600;">Country Details</span>
-                    </div>
-                    {f'<img src="{flag_url}" style="height: 18px; border-radius: 2px; border: 1px solid rgba(255,255,255,0.1);">' if flag_url else ''}
-                </div>
-                <div style="font-size: 16px; font-weight: 700; color: #a78bfa; margin-bottom: 4px;">
-                    {country_name}
-                </div>
-                <div style="font-size: 12px; color: var(--text-color); line-height: 1.4; margin-bottom: 4px;">
-                    🗣️ Lang: {langs} • Capital: {capital}
-                </div>
-                <div style="font-size: 11px; color: rgba(248, 250, 252, 0.5);">
-                    👥 Pop: {pop_fmt} • 💱 Currency: {currency}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+col_chat, col_dashboard = st.columns([5, 6], gap="large")
 
+# ── Left Column: AI chat ───────────────────────────────────────────────────
 
-# Render Budget Allocation Progress
-def render_budget_breakdown(state):
-    budget_val = state.get("budget")
-    currency = state.get("currency") or "USD"
-    
-    if not budget_val:
-        return
-        
-    st.markdown("<h4 style='font-size: 16px; font-weight: 600; margin-bottom: 12px;'>💰 Budget Allocation Breakdown</h4>", unsafe_allow_html=True)
-    
-    categories = [
-        {"name": "🏨 Accommodation", "percent": 40, "color": "#38bdf8"},
-        {"name": "🍔 Food & Dining", "percent": 25, "color": "#fb923c"},
-        {"name": "🚗 Transportation", "percent": 20, "color": "#34d399"},
-        {"name": "🎟️ Activities", "percent": 15, "color": "#a78bfa"}
-    ]
-    
-    for cat in categories:
-        amount = int(budget_val * (cat["percent"] / 100))
-        html = f"""
-        <div class="budget-item">
-            <div class="budget-header">
-                <div class="budget-name">{cat["name"]}</div>
-                <div class="budget-val">{amount} {currency} ({cat["percent"]}%)</div>
-            </div>
-            <div class="budget-progress-bg">
-                <div class="budget-progress-fill" style="width: {cat["percent"]}%; background-color: {cat["color"]};"></div>
-            </div>
-        </div>
-        """
-        st.markdown(html, unsafe_allow_html=True)
-
-# Render Itinerary Section
-def render_itinerary(state):
-    itinerary_text = state.get("itinerary")
-    if not itinerary_text:
-        st.markdown("""
-        <div style="text-align: center; padding: 40px; color: rgba(248, 250, 252, 0.4); border: 1px dashed var(--border-color); border-radius: 12px;">
-            <span style="font-size: 40px;">🗓️</span>
-            <div style="font-size: 15px; font-weight: 500; margin-top: 10px;">No Active Itinerary</div>
-            <div style="font-size: 12px; margin-top: 5px;">Fill the Quick Builder or ask the AI to start generating your custom schedule.</div>
-        </div>
-        """, unsafe_allow_html=True)
-        return
-        
-    days, intro = parse_itinerary_days(itinerary_text)
-    
-    tab_details, tab_raw = st.tabs(["🗓️ Detailed Itinerary", "📝 Plain Markdown"])
-    
-    with tab_details:
-        if intro:
-            st.markdown(intro)
-        
-        if days:
-            for day in days:
-                with st.expander(day["title"], icon=":material/calendar_today:"):
-                    st.markdown(day["content"])
-        else:
-            st.markdown(itinerary_text)
-            
-    with tab_raw:
-        st.code(itinerary_text, language="markdown")
-
-# --- Column 1: Chat Interface ---
 with col_chat:
-    st.markdown("<h4 style='font-size: 16px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;'><span style='font-size: 18px;'>💬</span> Conversation</h4>", unsafe_allow_html=True)
-    
-    # Message History Container
-    chat_container = st.container(height=500)
-    with chat_container:
-        if not st.session_state.messages:
-            st.markdown("""
-            <div style="text-align: center; padding: 40px 20px; color: rgba(248, 250, 252, 0.4);">
-                <span style="font-size: 32px;">👋</span>
-                <div style="font-size: 14px; font-weight: 500; margin-top: 10px;">Welcome to AeroPlan AI!</div>
-                <div style="font-size: 12px; margin-top: 5px;">Describe your dream vacation, or use the Quick Travel Builder in the sidebar.</div>
+    st.markdown(
+        """
+        <div class="glass-card" style="padding:20px;min-height:640px;">
+            <div class="chat-panel-header">
+                <div class="chat-avatar">🤖</div>
+                <div>
+                    <h3>AeroPlan Concierge</h3>
+                    <p>Ask me to design, adjust, or detail your dream trip itinerary</p>
+                </div>
             </div>
-            """, unsafe_allow_html=True)
-        
+        """,
+        unsafe_allow_html=True,
+    )
+
+    chat_box = st.container(height=420)
+    with chat_box:
+        if not st.session_state.messages:
+            st.markdown(
+                """
+                <div class="chat-welcome">
+                    <div class="chat-welcome-icon">🌍</div>
+                    <h4>Your Personal Travel Planner</h4>
+                    <p>Tell me where you want to go, for how long, and your budget.<br>
+                    Or use the <strong>Quick Travel Builder</strong> on the left panel to get started.</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            for suggestion in SUGGESTIONS:
+                if st.button(suggestion, key=f"sug_{suggestion[:25]}", width="stretch"):
+                    st.session_state.pending_query = suggestion
+
         for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
+            with st.chat_message(msg["role"], avatar="🧑‍✈️" if msg["role"] == "assistant" else None):
                 st.markdown(msg["content"])
-                
-    # Handle inputs
-    user_input = None
-    if "builder_prompt" in st.session_state:
-        user_input = st.session_state.pop("builder_prompt")
-        
-    chat_input = st.chat_input("Ask anything or fill details in the Quick Builder...", submit_mode="disable")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    user_input = st.session_state.pop("pending_query", None)
+    chat_input = st.chat_input("Plan a 5 day trip to Istanbul with budget of 3000 USD...")
     if chat_input:
         user_input = chat_input
-        
+
     if user_input:
-        # Add user query
         st.session_state.messages.append({"role": "user", "content": user_input})
-        with chat_container:
+        st.session_state.agent_status = "analyzer"
+
+        with chat_box:
             with st.chat_message("user"):
                 st.markdown(user_input)
-                
-        # Status placeholder in main col_dash so it updates live
-        # We will stream the assistant response inside the chat container
-        with chat_container:
-            with st.chat_message("assistant"):
-                # Define placeholders
-                response_placeholder = st.empty()
-                
-                # Retrieve the status placeholder in col_dash
-                # Wait, we need to declare it before the stream loop!
-                
-        # We use a placeholder on the dashboard side to display live status
-        # and update it during streaming
-        with col_dash:
-            status_placeholder = st.empty()
+            with st.chat_message("assistant", avatar="🧑‍✈️"):
+                typing_slot = st.empty()
+                with typing_slot:
+                    render_typing_indicator()
+                response_slot = st.empty()
+
+        with col_dashboard:
+            status_slot = st.empty()
             
-        # Stream response
         response_text = ""
-        stream = get_assistant_stream(user_input, st.session_state.session_id, status_placeholder)
-        
+        stream = get_assistant_stream(user_input, st.session_state.session_id, status_slot)
+
         for token in stream:
             response_text += token
-            response_placeholder.markdown(response_text)
-            
-        # Save assistant response
+            typing_slot.empty()
+            response_slot.markdown(response_text + "▌")
+
+        typing_slot.empty()
+        response_slot.markdown(response_text)
         st.session_state.messages.append({"role": "assistant", "content": response_text})
-        
-        # Load final state after completion to fetch tool results and update dashboard
         st.session_state.agent_status = "completed"
-        final_state = load_session_state(st.session_state.session_id)
+
+        final_state = load_backend_state(st.session_state.session_id)
         st.session_state.loaded_state = final_state
-        
-        # Rerun to update the entire dashboard view
         st.rerun()
 
-# --- Column 2: Dashboard Interface ---
-with col_dash:
-    st.markdown("<h4 style='font-size: 16px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;'><span style='font-size: 18px;'>📊</span> Travel Intelligence Dashboard</h4>", unsafe_allow_html=True)
+# ── Right Column: Travel Intelligence Dashboard ───────────────────────────
+
+with col_dashboard:
+    state_vals = st.session_state.loaded_state
     
-    # Active Agent Status Card
+    # 1. Real-time / Completed Status Tracker
     if st.session_state.agent_status:
-        render_agent_status(st.session_state.agent_status)
-    else:
-        st.markdown("""
-        <div style="text-align: center; padding: 12px; color: rgba(248, 250, 252, 0.3); border: 1px dashed var(--border-color); border-radius: 8px; margin-bottom: 20px; font-size: 12px;">
-            Agent Idle. Waiting for request.
-        </div>
-        """, unsafe_allow_html=True)
+        render_status_tracker(st.session_state.agent_status)
         
-    # Summary Metrics Cards
-    render_summary_cards(st.session_state.loaded_state)
-    
-    # Weather & Local Insights Cards
-    render_weather_and_info(st.session_state.loaded_state)
-    
-    # Budget Breakdown
-    render_budget_breakdown(st.session_state.loaded_state)
-    st.space("medium")
-    
-    # Collapsible day-by-day Itinerary
-    render_itinerary(st.session_state.loaded_state)
+    if state_vals and state_vals.get("destination"):
+        # We have active planning results!
+        dest = state_vals.get("destination")
+        duration = state_vals.get("duration", 0)
+        budget = state_vals.get("budget", 0)
+        currency = state_vals.get("currency", "USD")
+        prefs = state_vals.get("preferences", "")
+        itinerary = state_vals.get("itinerary")
+        tool_results = state_vals.get("tool_results", {})
+        
+        # Dashboard Wrapper Card
+        st.markdown('<div class="glass-card" style="padding:20px;">', unsafe_allow_html=True)
+        
+        st.markdown(
+            f"""
+            <div class="search-card-header">
+                <h3>Travel Dashboard</h3>
+                <span>{dest} Plan</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        
+        # Summary metrics
+        render_summary_metrics(dest, duration, budget, currency, prefs)
+        
+        st.write("")
+        
+        # Dashboard Tabs
+        tab_itin, tab_budget, tab_info = st.tabs([
+            "📅 Itinerary Explorer",
+            "💰 Budget Breakdown",
+            "🌤️ Destination Insights"
+        ])
+        
+        with tab_itin:
+            if itinerary:
+                st.markdown(itinerary)
+            else:
+                st.write("No itinerary generated.")
+                
+        with tab_budget:
+            render_budget_breakdown(budget, currency)
+            
+        with tab_info:
+            render_weather_and_info(tool_results)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    else:
+        # Welcome Screen if no active search has been performed
+        st.markdown(
+            """
+            <div class="empty-dashboard">
+                <div class="empty-dashboard-icon">🛫</div>
+                <h3>Ready to Design Your Trip?</h3>
+                <p>Use the Quick Travel Builder in the sidebar or ask the concierge to generate your itinerary and trip metrics.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )

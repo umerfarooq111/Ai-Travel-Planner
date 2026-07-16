@@ -1,0 +1,50 @@
+{
+    "test_fix": {
+        "user_id": "test_fix",
+        "travel_style": "General trip planning",
+        "preferred_transport": "",
+        "preferred_accommodation": "",
+        "favorite_destinations": [
+            "Paris"
+        ],
+        "interests": [],
+        "average_budget": 5000,
+        "preferred_currency": "USD"
+    },
+    "test_cli": {
+        "user_id": "test_cli",
+        "travel_style": "general travel planning",
+        "preferred_transport": "",
+        "preferred_accommodation": "",
+        "favorite_destinations": [
+            "Paris"
+        ],
+        "interests": [],
+        "average_budget": 5000,
+        "preferred_currency": "USD"
+    },
+    "test_cli2": {
+        "user_id": "test_cli2",
+        "travel_style": "No specific preferences mentioned beyond destination, duration, and budget.",
+        "preferred_transport": "",
+        "preferred_accommodation": "",
+        "favorite_destinations": [
+            "Paris"
+        ],
+        "interests": [],
+        "average_budget": 5000,
+        "preferred_currency": "USD"
+    },
+    "traveler_8bac47": {
+        "user_id": "traveler_8bac47",
+        "travel_style": "business class round trip",
+        "preferred_transport": "",
+        "preferred_accommodation": "",
+        "favorite_destinations": [
+            "London"
+        ],
+        "interests": [],
+        "average_budget": 0,
+        "preferred_currency": "PKR"
+    }
+}
